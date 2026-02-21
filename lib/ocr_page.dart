@@ -689,6 +689,8 @@ class _OCRPageState extends State<OCRPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       appBar:
           _isFullScreen
@@ -705,20 +707,11 @@ class _OCRPageState extends State<OCRPage> {
                         : null,
                 actions: [
                   IconButton(
-                    tooltip:
-                        widget.themeMode == ThemeMode.dark
-                            ? _t('theme_light')
-                            : _t('theme_dark'),
-                    icon: Icon(
-                      widget.themeMode == ThemeMode.dark
-                          ? Icons.light_mode
-                          : Icons.dark_mode,
-                    ),
+                    tooltip: isDarkMode ? _t('theme_light') : _t('theme_dark'),
+                    icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
                     onPressed: () {
                       final nextMode =
-                          widget.themeMode == ThemeMode.dark
-                              ? ThemeMode.light
-                              : ThemeMode.dark;
+                          isDarkMode ? ThemeMode.light : ThemeMode.dark;
                       widget.onThemeModeChanged(nextMode);
                     },
                   ),

@@ -539,23 +539,25 @@ class _OCRPageState extends State<OCRPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                ElevatedButton(
+                ElevatedButton.icon(
                   onPressed:
                       _isProcessing
                           ? null
                           : () => pickImage(ImageSource.gallery),
-                  child: Text(
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: Text(
                     _t('gallery'),
                     style: const TextStyle(fontSize: 16),
                   ),
                 ),
                 const SizedBox(width: 16),
-                ElevatedButton(
+                ElevatedButton.icon(
                   onPressed:
                       _isProcessing
                           ? null
                           : () => pickImage(ImageSource.camera),
-                  child: Text(
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  label: Text(
                     _t('camera'),
                     style: const TextStyle(fontSize: 16),
                   ),
@@ -577,12 +579,16 @@ class _OCRPageState extends State<OCRPage> {
                   ),
                   const SizedBox(height: 16),
                   if (_showScanButton)
-                    ElevatedButton(
+                    ElevatedButton.icon(
                       onPressed: startScanning,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color.fromARGB(255, 76, 99, 121),
                       ),
-                      child: Text(
+                      icon: const Icon(
+                        Icons.document_scanner,
+                        color: Colors.white,
+                      ),
+                      label: Text(
                         _t('scan'),
                         style: const TextStyle(
                           fontSize: 18,
@@ -722,11 +728,23 @@ class _OCRPageState extends State<OCRPage> {
                         (context) => [
                           PopupMenuItem(
                             value: AppLanguage.english,
-                            child: Text(_t('lang_english')),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.translate),
+                                const SizedBox(width: 8),
+                                Text(_t('lang_english')),
+                              ],
+                            ),
                           ),
                           PopupMenuItem(
                             value: AppLanguage.amharic,
-                            child: Text(_t('lang_amharic')),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.translate),
+                                const SizedBox(width: 8),
+                                Text(_t('lang_amharic')),
+                              ],
+                            ),
                           ),
                         ],
                     onSelected: _setLanguage,
@@ -736,19 +754,43 @@ class _OCRPageState extends State<OCRPage> {
                         (context) => [
                           PopupMenuItem(
                             value: 'edit',
-                            child: Text(_t('edit_text')),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.edit_outlined),
+                                const SizedBox(width: 8),
+                                Text(_t('edit_text')),
+                              ],
+                            ),
                           ),
                           PopupMenuItem(
                             value: 'history',
-                            child: Text(_t('view_history')),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.history),
+                                const SizedBox(width: 8),
+                                Text(_t('view_history')),
+                              ],
+                            ),
                           ),
                           PopupMenuItem(
                             value: 'copy',
-                            child: Text(_t('copy_clipboard')),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.copy_all_outlined),
+                                const SizedBox(width: 8),
+                                Text(_t('copy_clipboard')),
+                              ],
+                            ),
                           ),
                           PopupMenuItem(
                             value: 'about',
-                            child: Text(_t('about')),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.info_outline),
+                                const SizedBox(width: 8),
+                                Text(_t('about')),
+                              ],
+                            ),
                           ),
                         ],
                     onSelected: (value) {

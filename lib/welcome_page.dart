@@ -36,7 +36,7 @@ class WelcomePage extends StatelessWidget {
                 ),
                 const SizedBox(height: 30),
                 const Text(
-                  "Welcome to AAOCR \nእንኳን ደህና መጡ ",
+                  "Welcome to AAOCR \n    እንኳን ደህና መጡ ",
                   style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.bold,

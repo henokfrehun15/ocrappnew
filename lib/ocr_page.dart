@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'file_handler.dart';
 import 'ocr_processor.dart';
@@ -27,14 +26,18 @@ class OCRPage extends StatefulWidget {
 
 class _OCRPageState extends State<OCRPage> {
   File? _image;
+  List<File> _selectedImages = [];
+  List<OCRPageResult> _scanPages = [];
   String _result = "";
   bool _isProcessing = false;
+  bool _isScanning = false;
   double _progress = 0.0; // Added
   bool _showScanButton = false;
   bool _isFullScreen = false;
   bool _isEditing = false;
   bool _showSaveButtons = false;
   bool _hasScannedText = false;
+  bool _isBatchScan = false;
   double _recognizedTextSize = 12.0;
   AppLanguage _language = AppLanguage.english;
   final TextEditingController _textEditingController = TextEditingController();
@@ -243,13 +246,17 @@ class _OCRPageState extends State<OCRPage> {
   Future<void> startScanning() async {
     if (_image == null) return;
 
+    setState(() {
+      _isScanning = true;
+      _showScanButton = false;
+      _result = "";
+      _hasScannedText = false;
+      _showSaveButtons = false;
+    });
     _setProgress(true, 0.1);
-    _showScanButton = false;
-    _result = "";
-    _hasScannedText = false;
 
     try {
-      // Show initial progress
+      await Future.delayed(const Duration(milliseconds: 120));
       _setProgress(true, 0.2);
 
       final recognizedText = await _ocrProcessor.recognizeText(_image!);
@@ -273,8 +280,70 @@ class _OCRPageState extends State<OCRPage> {
       );
     } finally {
       await Future.delayed(const Duration(milliseconds: 300));
+      if (mounted) {
+        setState(() => _isScanning = false);
+      }
       _setProgress(false);
     }
+  }
+
+  Widget _buildSkeletonLine(double widthFactor, {double height = 14}) {
+    final width = MediaQuery.of(context).size.width * widthFactor;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScanningSkeleton() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _t(
+                      'scanning',
+                      values: {'percent': (_progress * 100).round().toString()},
+                    ),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            LinearProgressIndicator(value: _progress > 0 ? _progress : null),
+            const SizedBox(height: 16),
+            _buildSkeletonLine(0.72, height: 16),
+            const SizedBox(height: 10),
+            _buildSkeletonLine(0.95),
+            const SizedBox(height: 8),
+            _buildSkeletonLine(0.88),
+            const SizedBox(height: 8),
+            _buildSkeletonLine(0.93),
+            const SizedBox(height: 8),
+            _buildSkeletonLine(0.61),
+          ],
+        ),
+      ),
+    );
   }
 
   void _toggleFullScreen() {
@@ -301,58 +370,82 @@ class _OCRPageState extends State<OCRPage> {
     setState(() => _isEditing = false);
   }
 
-  Future<void> _saveFile(String type) async {
+  Widget _buildEditExportButtons() {
+    return Column(
+      children: [
+        const SizedBox(height: 20),
+        ElevatedButton.icon(
+          icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+          label: Text(
+            _t('save_as_pdf'),
+            style: const TextStyle(color: Colors.white),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color.fromARGB(255, 76, 99, 121),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          ),
+          onPressed:
+              () => _saveFile('pdf', content: _textEditingController.text),
+        ),
+        const SizedBox(height: 15),
+        ElevatedButton.icon(
+          icon: const Icon(Icons.text_snippet, color: Colors.white),
+          label: Text(
+            _t('save_as_text'),
+            style: const TextStyle(color: Colors.white),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color.fromARGB(255, 76, 99, 121),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          ),
+          onPressed:
+              () => _saveFile('txt', content: _textEditingController.text),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _saveFile(String type, {String? content}) async {
+    final textToSave = content ?? _result;
     setState(() => _isProcessing = true);
     try {
-      if (await Permission.storage.request().isGranted) {
-        // First save the file
-        final file =
-            type == 'pdf'
-                ? await _fileHandler.savePDF(_result)
-                : await _fileHandler.saveTextFile(_result);
+      final file =
+          type == 'pdf'
+              ? await _fileHandler.savePDF(textToSave)
+              : await _fileHandler.saveTextFile(textToSave);
 
-        // Then ask if user wants to share
-        final shouldShare = await showDialog<bool>(
-          context: context,
-          builder:
-              (context) => AlertDialog(
-                title: Text(
-                  _t('saved_success', values: {'type': _fileTypeLabel(type)}),
-                ),
-                content: Text(_t('share_prompt')),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: Text(_t('no')),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    child: Text(_t('share')),
-                  ),
-                ],
+      final shouldShare = await showDialog<bool>(
+        context: context,
+        builder:
+            (context) => AlertDialog(
+              title: Text(
+                _t('saved_success', values: {'type': _fileTypeLabel(type)}),
               ),
-        );
-
-        if (shouldShare == true) {
-          await Share.shareXFiles(
-            [XFile(file.path)],
-            subject: _t(
-              'share_subject',
-              values: {'type': _fileTypeLabel(type)},
+              content: Text(_t('share_prompt')),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(_t('no')),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text(_t('share')),
+                ),
+              ],
             ),
-          );
-        }
+      );
 
-        Fluttertoast.showToast(
-          msg: _t('file_saved_downloads'),
-          toastLength: Toast.LENGTH_SHORT,
-        );
-      } else {
-        Fluttertoast.showToast(
-          msg: _t('storage_permission_required'),
-          backgroundColor: Colors.red,
+      if (shouldShare == true) {
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          subject: _t('share_subject', values: {'type': _fileTypeLabel(type)}),
         );
       }
+
+      Fluttertoast.showToast(
+        msg: _t('file_saved_downloads'),
+        toastLength: Toast.LENGTH_SHORT,
+      );
     } catch (e) {
       Fluttertoast.showToast(
         msg: _t('error_saving_file', values: {'error': e.toString()}),
@@ -468,6 +561,7 @@ class _OCRPageState extends State<OCRPage> {
               ),
             ],
           ),
+          _buildEditExportButtons(),
         ],
       ),
     );
@@ -601,11 +695,15 @@ class _OCRPageState extends State<OCRPage> {
 
             const SizedBox(height: 20),
 
-            // Progress bar
-            if (_isProcessing) _buildProgressBar(),
+            // Progress bar / skeleton during scan
+            if (_isScanning) ...[
+              _buildScanningSkeleton(),
+              const SizedBox(height: 16),
+            ] else if (_isProcessing)
+              _buildProgressBar(),
 
             // Result display
-            if (!_isProcessing && _result.isNotEmpty)
+            if (!_isScanning && !_isProcessing && _result.isNotEmpty)
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),

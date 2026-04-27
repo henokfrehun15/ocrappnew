@@ -4,9 +4,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
+
+import 'ocr_processor.dart';
 
 class FileHandler {
   final ImagePicker _picker = ImagePicker();
@@ -16,8 +17,9 @@ class FileHandler {
   Future<void> _loadFont() async {
     if (_amharicFont != null) return; // Already loaded
     try {
-      final fontData =
-          await rootBundle.load('assets/fonts/AbyssinicaSIL-Regular.ttf');
+      final fontData = await rootBundle.load(
+        'assets/fonts/AbyssinicaSIL-Regular.ttf',
+      );
       _amharicFont = pw.Font.ttf(fontData);
     } catch (e) {
       _amharicFont = pw.Font.courier(); // Fallback
@@ -28,6 +30,15 @@ class FileHandler {
     try {
       final XFile? picked = await _picker.pickImage(source: source);
       return picked != null ? File(picked.path) : null;
+    } on PlatformException catch (e) {
+      throw Exception('Image picker error: ${e.message}');
+    }
+  }
+
+  Future<List<File>> pickMultiImages() async {
+    try {
+      final picked = await _picker.pickMultiImage();
+      return picked.map((x) => File(x.path)).toList(growable: false);
     } on PlatformException catch (e) {
       throw Exception('Image picker error: ${e.message}');
     }
@@ -49,18 +60,6 @@ class FileHandler {
     return prefs.getStringList('scanHistory') ?? [];
   }
 
-  Future<bool> _requestStoragePermission() async {
-    if (Platform.isAndroid) {
-      final status = await Permission.storage.status;
-      if (!status.isGranted) {
-        final result = await Permission.storage.request();
-        return result.isGranted;
-      }
-      return true;
-    }
-    return true;
-  }
-
   Future<Directory?> _getDownloadsDirectory() async {
     if (Platform.isAndroid) {
       final List<String> paths = [
@@ -80,55 +79,63 @@ class FileHandler {
     return null;
   }
 
-  Future<File> _saveFile(String content, String extension,
-      {bool useDownloads = true}) async {
-    if (!await _requestStoragePermission()) {
-      throw Exception('Storage permission denied');
-    }
-
-    final Directory dir = useDownloads
-        ? (await _getDownloadsDirectory()) ??
-            await getApplicationDocumentsDirectory()
-        : await getApplicationDocumentsDirectory();
+  Future<File> _saveFile(
+    String content,
+    String extension, {
+    bool useDownloads = true,
+  }) async {
+    final Directory preferredDir =
+        useDownloads
+            ? (await _getDownloadsDirectory()) ??
+                await getApplicationDocumentsDirectory()
+            : await getApplicationDocumentsDirectory();
+    final Directory fallbackDir = await getApplicationDocumentsDirectory();
 
     final timestamp = _dateFormat.format(DateTime.now());
     final filename = 'Amharic_OCR_$timestamp.$extension';
-    final file = File('${dir.path}/$filename');
 
-    if (extension == 'pdf') {
-      await _loadFont(); // Ensure font is loaded
-      final pdf = pw.Document();
-      pdf.addPage(
-        pw.Page(
-          build: (pw.Context context) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Header(
-                text: 'Amharic OCR Result',
-                level: 0,
-                textStyle: pw.TextStyle(
-                  fontSize: 24,
-                  font: _amharicFont,
-                  fontWeight: pw.FontWeight.bold,
+    Future<File> writeTo(Directory dir) async {
+      final file = File('${dir.path}/$filename');
+      if (extension == 'pdf') {
+        await _loadFont();
+        final pdf = pw.Document();
+        pdf.addPage(
+          pw.Page(
+            build:
+                (pw.Context context) => pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Header(
+                      text: 'Amharic OCR Result',
+                      level: 0,
+                      textStyle: pw.TextStyle(
+                        fontSize: 24,
+                        font: _amharicFont,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 20),
+                    pw.Text(
+                      content,
+                      style: pw.TextStyle(fontSize: 16, font: _amharicFont),
+                    ),
+                  ],
                 ),
-              ),
-              pw.SizedBox(height: 20),
-              pw.Text(
-                content,
-                style: pw.TextStyle(
-                  fontSize: 16,
-                  font: _amharicFont,
-                ),
-              ),
-            ],
           ),
-        ),
-      );
-      await file.writeAsBytes(await pdf.save());
-    } else {
-      await file.writeAsString(content);
+        );
+        await file.writeAsBytes(await pdf.save());
+      } else {
+        await file.writeAsString(content);
+      }
+      return file;
     }
-    return file;
+
+    try {
+      return await writeTo(preferredDir);
+    } catch (_) {
+      if (preferredDir.path == fallbackDir.path) rethrow;
+      return await writeTo(fallbackDir);
+    }
   }
 
   Future<File> savePDF(String text, {bool useDownloads = true}) async {
@@ -170,10 +177,7 @@ class FileHandler {
                     alignment: pw.Alignment.centerRight,
                     child: pw.Text(
                       'Page ${i + 1} of ${chunks.length}',
-                      style: pw.TextStyle(
-                        fontSize: 10,
-                        font: _amharicFont,
-                      ),
+                      style: pw.TextStyle(fontSize: 10, font: _amharicFont),
                     ),
                   ),
               ],
@@ -183,15 +187,101 @@ class FileHandler {
       );
     }
 
-    final dir = useDownloads
-        ? (await _getDownloadsDirectory()) ??
-            await getApplicationDocumentsDirectory()
-        : await getApplicationDocumentsDirectory();
+    final preferredDir =
+        useDownloads
+            ? (await _getDownloadsDirectory()) ??
+                await getApplicationDocumentsDirectory()
+            : await getApplicationDocumentsDirectory();
+    final fallbackDir = await getApplicationDocumentsDirectory();
 
     final timestamp = _dateFormat.format(DateTime.now());
-    final file = File('${dir.path}/Amharic_OCR_$timestamp.pdf');
-    await file.writeAsBytes(await pdf.save());
-    return file;
+
+    Future<File> writeTo(Directory dir) async {
+      final file = File('${dir.path}/Amharic_OCR_$timestamp.pdf');
+      await file.writeAsBytes(await pdf.save());
+      return file;
+    }
+
+    try {
+      return await writeTo(preferredDir);
+    } catch (_) {
+      if (preferredDir.path == fallbackDir.path) rethrow;
+      return await writeTo(fallbackDir);
+    }
+  }
+
+  Future<File> saveSearchablePdfFromPages(
+    List<OCRPageResult> pages, {
+    bool useDownloads = true,
+  }) async {
+    await _loadFont();
+    final pdf = pw.Document();
+    final timestamp = _dateFormat.format(DateTime.now());
+
+    final contentPages = pages.isEmpty ? [null] : pages.cast<OCRPageResult?>();
+    for (var i = 0; i < contentPages.length; i++) {
+      final page = contentPages[i];
+      pdf.addPage(
+        pw.Page(
+          margin: const pw.EdgeInsets.all(20),
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Header(
+                  level: 0,
+                  text:
+                      page == null
+                          ? 'Amharic OCR Result'
+                          : 'Amharic OCR Result - Page ${i + 1}',
+                  textStyle: pw.TextStyle(
+                    fontSize: 24,
+                    font: _amharicFont,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 12),
+                if (page != null) ...[
+                  pw.Text(
+                    'Confidence: ${(page.confidence * 100).toStringAsFixed(1)}%',
+                    style: pw.TextStyle(fontSize: 11, font: _amharicFont),
+                  ),
+                  pw.SizedBox(height: 12),
+                ],
+                pw.Text(
+                  page?.text ?? '',
+                  style: pw.TextStyle(
+                    fontSize: 14,
+                    font: _amharicFont,
+                    lineSpacing: 5,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    final preferredDir =
+        useDownloads
+            ? (await _getDownloadsDirectory()) ??
+                await getApplicationDocumentsDirectory()
+            : await getApplicationDocumentsDirectory();
+    final fallbackDir = await getApplicationDocumentsDirectory();
+
+    Future<File> writeTo(Directory dir) async {
+      final file = File('${dir.path}/Amharic_OCR_Batch_$timestamp.pdf');
+      await file.writeAsBytes(await pdf.save());
+      return file;
+    }
+
+    try {
+      return await writeTo(preferredDir);
+    } catch (_) {
+      if (preferredDir.path == fallbackDir.path) rethrow;
+      return await writeTo(fallbackDir);
+    }
   }
 
   List<String> _splitTextIntoChunks(String text, int maxChars) {
@@ -224,10 +314,9 @@ class FileHandler {
   }
 
   Future<void> shareFile(File file, {String? subject}) async {
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      subject: subject ?? 'Amharic OCR Result',
-    );
+    await Share.shareXFiles([
+      XFile(file.path),
+    ], subject: subject ?? 'Amharic OCR Result');
   }
 }
 

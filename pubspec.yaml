@@ -41,8 +41,8 @@ flutter:
   assets:
     - assets/fonts/AbyssinicaSIL-Regular.ttf
     - assets/models/new_amharic_yolo8s_last.tflite
-    - assets/models/new_amharic_crnn.tflite
-    - assets/data/amharic_vocab.txt
+    - assets/models/ocr_fixed_tcn_ctc.tflite
+    - assets/data/awam_vocab.txt
   fonts:
     - family: AbyssinicaSIL
       fonts:

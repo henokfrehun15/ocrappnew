@@ -37,7 +37,6 @@ class _OCRPageState extends State<OCRPage> {
   bool _isEditing = false;
   bool _showSaveButtons = false;
   bool _hasScannedText = false;
-  bool _isBatchScan = false;
   double _recognizedTextSize = 12.0;
   AppLanguage _language = AppLanguage.english;
   final TextEditingController _textEditingController = TextEditingController();
@@ -51,10 +50,13 @@ class _OCRPageState extends State<OCRPage> {
       'app_title': 'Amharic and Awngi OCR',
       'no_text': 'No text recognized yet.',
       'recognized_text': 'Recognized Text:',
+      'confidence': 'Confidence',
+      'page_review': 'Page Review',
       'theme_dark': 'Dark mode',
       'theme_light': 'Light mode',
       'text_size': 'Text size',
       'gallery': 'Gallery',
+      'batch_scan': 'Mult Scan',
       'camera': 'Camera',
       'scan': 'Scan',
       'processing': 'Processing...',
@@ -97,10 +99,13 @@ class _OCRPageState extends State<OCRPage> {
       'app_title': 'አማርኛ እና አዊኛ OCR',
       'no_text': 'እስካሁን ጽሑፍ አልተገኘም።',
       'recognized_text': 'የተገኘ ጽሑፍ:',
+      'confidence': 'እምነት',
+      'page_review': 'የገጽ ማረጋገጫ',
       'theme_dark': 'ጨለማ ሁነታ',
       'theme_light': 'ብሩህ ሁነታ',
       'text_size': 'የጽሑፍ መጠን',
       'gallery': 'ጋለሪ',
+      'batch_scan': 'Multi Scan',
       'camera': 'ካሜራ',
       'scan': 'ስካን',
       'processing': 'በሂደት ላይ...',
@@ -220,18 +225,14 @@ class _OCRPageState extends State<OCRPage> {
     try {
       final image = await _fileHandler.pickImage(source);
       if (image != null) {
-        final croppedFile = await Navigator.push<File?>(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CropYourImageScreen(imageFile: image),
-          ),
-        );
-
-        if (croppedFile != null) {
+        final edited = await _editPickedImages([image]);
+        if (edited.isNotEmpty) {
           setState(() {
-            _image = croppedFile;
+            _selectedImages = edited;
+            _image = edited.first;
             _showScanButton = true;
             _showSaveButtons = false;
+            _scanPages = [];
             _result = _t('image_ready');
           });
         }
@@ -243,8 +244,50 @@ class _OCRPageState extends State<OCRPage> {
     }
   }
 
+  Future<void> pickBatchImages() async {
+    try {
+      final images = await _fileHandler.pickMultiImages();
+      if (images.isEmpty) return;
+
+      final edited = await _editPickedImages(images);
+      if (edited.isEmpty) return;
+
+      setState(() {
+        _selectedImages = edited;
+        _image = edited.first;
+        _showScanButton = true;
+        _showSaveButtons = false;
+        _scanPages = [];
+        _result = _t('image_ready');
+      });
+    } catch (e) {
+      setState(
+        () => _result = _t('error_pick_crop', values: {'error': e.toString()}),
+      );
+    }
+  }
+
+  Future<List<File>> _editPickedImages(List<File> images) async {
+    final edited = <File>[];
+    for (final image in images) {
+      final croppedFile = await Navigator.push<File?>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CropYourImageScreen(imageFile: image),
+        ),
+      );
+      if (croppedFile != null) {
+        edited.add(croppedFile);
+      }
+    }
+    return edited;
+  }
+
   Future<void> startScanning() async {
-    if (_image == null) return;
+    if (_selectedImages.isEmpty && _image == null) return;
+
+    final imagesToScan =
+        _selectedImages.isNotEmpty ? _selectedImages : [_image!];
 
     setState(() {
       _isScanning = true;
@@ -252,27 +295,32 @@ class _OCRPageState extends State<OCRPage> {
       _result = "";
       _hasScannedText = false;
       _showSaveButtons = false;
+      _scanPages = [];
     });
     _setProgress(true, 0.1);
 
     try {
-      await Future.delayed(const Duration(milliseconds: 120));
-      _setProgress(true, 0.2);
+      final pages = <OCRPageResult>[];
+      for (var i = 0; i < imagesToScan.length; i++) {
+        final page = await _ocrProcessor.recognizeTextDetailed(imagesToScan[i]);
+        pages.add(page);
+        _setProgress(true, (i + 1) / imagesToScan.length);
+      }
 
-      final recognizedText = await _ocrProcessor.recognizeText(_image!);
-
-      _setProgress(true, 0.9);
-      await Future.delayed(
-        const Duration(milliseconds: 200),
-      ); // Give UI time to catch up
+      final combinedText = _cleanupRecognizedText(
+        pages.map((p) => p.text).join('\n\n'),
+      );
 
       setState(() {
-        _result = recognizedText;
+        _scanPages = pages;
+        _result = combinedText;
         _showSaveButtons = true;
         _hasScannedText = true;
+        _selectedImages = pages.map((p) => p.imageFile).toList(growable: false);
+        _image = _selectedImages.isNotEmpty ? _selectedImages.first : _image;
       });
 
-      await _fileHandler.saveToHistory(recognizedText, _scanHistory);
+      await _fileHandler.saveToHistory(combinedText, _scanHistory);
       await _loadScanHistory();
     } catch (e) {
       setState(
@@ -370,6 +418,25 @@ class _OCRPageState extends State<OCRPage> {
     setState(() => _isEditing = false);
   }
 
+  String _cleanupRecognizedText(String text) {
+    if (text.trim().isEmpty) return text;
+
+    var cleaned = text.replaceAll(RegExp(r'[\t ]+'), ' ');
+    cleaned = cleaned.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    cleaned = cleaned.replaceAll(RegExp(r'\s+([\.,!?።፣፤፥፦])'), r'$1');
+    cleaned = cleaned.replaceAll(RegExp(r'([\(\[\{])\s+'), r'$1');
+    cleaned = cleaned.replaceAll(RegExp(r'\s+([\)\]\}])'), r'$1');
+
+    final lines =
+        cleaned
+            .split('\n')
+            .map((line) => line.trim())
+            .where((line) => line.isNotEmpty)
+            .toList();
+
+    return lines.join('\n');
+  }
+
   Widget _buildEditExportButtons() {
     return Column(
       children: [
@@ -405,13 +472,19 @@ class _OCRPageState extends State<OCRPage> {
     );
   }
 
-  Future<void> _saveFile(String type, {String? content}) async {
+  Future<void> _saveFile(
+    String type, {
+    String? content,
+    List<OCRPageResult>? pages,
+  }) async {
     final textToSave = content ?? _result;
     setState(() => _isProcessing = true);
     try {
       final file =
           type == 'pdf'
-              ? await _fileHandler.savePDF(textToSave)
+              ? (pages != null && pages.isNotEmpty)
+                  ? await _fileHandler.saveSearchablePdfFromPages(pages)
+                  : await _fileHandler.savePDF(textToSave)
               : await _fileHandler.saveTextFile(textToSave);
 
       final shouldShare = await showDialog<bool>(
@@ -584,7 +657,7 @@ class _OCRPageState extends State<OCRPage> {
             backgroundColor: const Color.fromARGB(255, 76, 99, 121),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           ),
-          onPressed: () => _saveFile('pdf'),
+          onPressed: () => _saveFile('pdf', pages: _scanPages),
         ),
         const SizedBox(height: 15),
         ElevatedButton.icon(
@@ -597,7 +670,105 @@ class _OCRPageState extends State<OCRPage> {
             backgroundColor: const Color.fromARGB(255, 76, 99, 121),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           ),
-          onPressed: () => _saveFile('txt'),
+          onPressed: () => _saveFile('txt', content: _result),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPageReviewCard(OCRPageResult page, int index) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${_t('page_review')} $index',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final imageWidget = ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    page.imageFile,
+                    fit: BoxFit.cover,
+                    height: 240,
+                    width: double.infinity,
+                  ),
+                );
+
+                final textWidget = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 8),
+                    if (page.regions.isNotEmpty)
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children:
+                            page.regions
+                                .map((region) => Chip(label: Text(region.text)))
+                                .toList(),
+                      ),
+                    const SizedBox(height: 12),
+                    SelectableText(
+                      page.text,
+                      style: TextStyle(
+                        fontSize: _recognizedTextSize,
+                        fontFamily: 'AbyssinicaSIL',
+                      ),
+                    ),
+                  ],
+                );
+
+                if (constraints.maxWidth >= 700) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 4, child: imageWidget),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 6, child: textWidget),
+                    ],
+                  );
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    imageWidget,
+                    const SizedBox(height: 12),
+                    textWidget,
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScanReview() {
+    if (_scanPages.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 16),
+        Text(
+          _scanPages.length > 1 ? 'Pages' : _t('page_review'),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+        const SizedBox(height: 12),
+        ...List.generate(
+          _scanPages.length,
+          (index) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _buildPageReviewCard(_scanPages[index], index + 1),
+          ),
         ),
       ],
     );
@@ -629,32 +800,50 @@ class _OCRPageState extends State<OCRPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Pick Image buttons
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Pick Image buttons (two rows to avoid overflow on narrow screens)
+            Column(
               children: [
-                ElevatedButton.icon(
-                  onPressed:
-                      _isProcessing
-                          ? null
-                          : () => pickImage(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: Text(
-                    _t('gallery'),
-                    style: const TextStyle(fontSize: 16),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed:
+                          _isProcessing
+                              ? null
+                              : () => pickImage(ImageSource.gallery),
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: Text(
+                        _t('gallery'),
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    ElevatedButton.icon(
+                      onPressed: _isProcessing ? null : pickBatchImages,
+                      icon: const Icon(Icons.library_add_outlined),
+                      label: Text(
+                        _t('batch_scan'),
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 16),
-                ElevatedButton.icon(
-                  onPressed:
-                      _isProcessing
-                          ? null
-                          : () => pickImage(ImageSource.camera),
-                  icon: const Icon(Icons.photo_camera_outlined),
-                  label: Text(
-                    _t('camera'),
-                    style: const TextStyle(fontSize: 16),
-                  ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed:
+                          _isProcessing
+                              ? null
+                              : () => pickImage(ImageSource.camera),
+                      icon: const Icon(Icons.photo_camera_outlined),
+                      label: Text(
+                        _t('camera'),
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -759,6 +948,8 @@ class _OCRPageState extends State<OCRPage> {
                   ),
                 ),
               ),
+
+            _buildScanReview(),
 
             _buildFileExportButtons(),
           ],

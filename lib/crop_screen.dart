@@ -1,10 +1,11 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
+
 import 'package:crop_your_image/crop_your_image.dart';
+import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 
 class CropYourImageScreen extends StatefulWidget {
   final File imageFile;
@@ -16,15 +17,18 @@ class CropYourImageScreen extends StatefulWidget {
 }
 
 class _CropYourImageScreenState extends State<CropYourImageScreen> {
-  final CropController _controller = CropController();
+  late CropController _controller;
   late Uint8List _originalBytes;
   late Uint8List _imageBytes;
   bool _isLoading = true;
   String? _loadError;
+  int _quarterTurns = 0;
+  double _deskewAngle = 0.0;
 
   @override
   void initState() {
     super.initState();
+    _controller = CropController();
     _loadBytes();
   }
 
@@ -55,33 +59,45 @@ class _CropYourImageScreenState extends State<CropYourImageScreen> {
     }
   }
 
-  Future<void> _updateImageBytes(
-    img.Image Function(img.Image image) transform,
-  ) async {
-    final decoded = img.decodeImage(_imageBytes);
+  Future<void> _applyRotation() async {
+    final decoded = img.decodeImage(_originalBytes);
     if (decoded == null) return;
 
-    final updated = transform(decoded);
+    final angle = _quarterTurns * 90.0 + _deskewAngle;
+    final updated =
+        angle == 0 ? decoded : img.copyRotate(decoded, angle: angle);
     final encoded = Uint8List.fromList(img.encodeJpg(updated, quality: 95));
 
     if (!mounted) return;
     setState(() {
       _imageBytes = encoded;
+      // Reset the crop controller so the view doesn't keep a previous zoom/rect
+      _controller = CropController();
     });
   }
 
   Future<void> _rotateLeft() async {
-    await _updateImageBytes((image) => img.copyRotate(image, angle: -90));
+    _quarterTurns -= 1;
+    await _applyRotation();
   }
 
   Future<void> _rotateRight() async {
-    await _updateImageBytes((image) => img.copyRotate(image, angle: 90));
+    _quarterTurns += 1;
+    await _applyRotation();
+  }
+
+  Future<void> _setDeskewAngle(double angle) async {
+    _deskewAngle = angle;
+    await _applyRotation();
   }
 
   void _resetImage() {
     if (_isLoading) return;
     setState(() {
+      _quarterTurns = 0;
+      _deskewAngle = 0.0;
       _imageBytes = Uint8List.fromList(_originalBytes);
+      _controller = CropController();
     });
   }
 
@@ -142,6 +158,7 @@ class _CropYourImageScreenState extends State<CropYourImageScreen> {
                 children: [
                   Expanded(
                     child: Crop(
+                      key: ValueKey(_imageBytes.hashCode),
                       image: _imageBytes,
                       controller: _controller,
                       onCropped: _saveCroppedImage,
@@ -157,23 +174,72 @@ class _CropYourImageScreenState extends State<CropYourImageScreen> {
                     top: false,
                     child: Padding(
                       padding: const EdgeInsets.all(12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          FilledButton.tonalIcon(
-                            onPressed: _rotateLeft,
-                            icon: const Icon(Icons.rotate_left),
-                            label: const Text('Left'),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.tonalIcon(
+                                  onPressed: _rotateLeft,
+                                  icon: const Icon(Icons.rotate_left),
+                                  label: const Text('Left'),
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton.tonalIcon(
+                                  onPressed: _resetImage,
+                                  icon: const Icon(Icons.restore),
+                                  label: const Text('Reset'),
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton.tonalIcon(
+                                  onPressed: _rotateRight,
+                                  icon: const Icon(Icons.rotate_right),
+                                  label: const Text('Right'),
+                                  style: FilledButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          FilledButton.tonalIcon(
-                            onPressed: _resetImage,
-                            icon: const Icon(Icons.restore),
-                            label: const Text('Reset'),
-                          ),
-                          FilledButton.tonalIcon(
-                            onPressed: _rotateRight,
-                            icon: const Icon(Icons.rotate_right),
-                            label: const Text('Right'),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              const Icon(Icons.tune, size: 18),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Slider(
+                                  value: _deskewAngle,
+                                  min: -15,
+                                  max: 15,
+                                  divisions: 30,
+                                  label: '${_deskewAngle.toStringAsFixed(1)}°',
+                                  onChanged: (value) {
+                                    _setDeskewAngle(value);
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),

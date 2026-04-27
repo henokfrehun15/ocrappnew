@@ -6,13 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 import 'dart:ui';
 
-class _RecognizedRegion {
-  _RecognizedRegion({required this.box, required this.text});
-
-  final Rect box;
-  final String text;
-}
-
 class OCRRegionResult {
   OCRRegionResult({
     required this.box,
@@ -47,13 +40,6 @@ class OCRBatchResult {
   String get combinedText => pages.map((p) => p.text).join('\n\n');
 }
 
-class _CrnnRecognitionResult {
-  _CrnnRecognitionResult({required this.text, required this.confidence});
-
-  final String text;
-  final double confidence;
-}
-
 class _WordRecognitionResult {
   _WordRecognitionResult({required this.text, required this.confidence});
 
@@ -64,7 +50,6 @@ class _WordRecognitionResult {
 class OCRProcessor {
   Interpreter? _yoloInterpreter;
   Interpreter? _crnnInterpreter;
-  List<int>? _crnnBaseInputShape;
   List<String> _vocab = [];
   static const double _yoloConfThreshold = 0.35;
   static const double _yoloIouThreshold = 0.5;
@@ -86,9 +71,6 @@ class OCRProcessor {
       'assets/models/ocr_fixed_tcn_ctc.tflite',
     );
     _crnnInterpreter!.allocateTensors();
-    _crnnBaseInputShape = List<int>.from(
-      _crnnInterpreter!.getInputTensor(0).shape,
-    );
     _vocab = await _loadVocabulary();
     _logCrnnTensorInfo();
   }
@@ -409,13 +391,6 @@ class OCRProcessor {
     return const <List<double>>[];
   }
 
-  Future<String> _recognizeTextInRegions(
-    img.Image image,
-    List<Rect> detections,
-  ) async {
-    throw UnimplementedError();
-  }
-
   Future<OCRPageResult> _recognizeTextInRegions(
     img.Image image,
     List<Rect> detections,
@@ -588,7 +563,10 @@ class OCRProcessor {
     return img.copyResize(src, width: targetW, height: targetH);
   }
 
-  Future<_WordRecognitionResult> _recognizeWord(img.Image image, Rect box) async {
+  Future<_WordRecognitionResult> _recognizeWord(
+    img.Image image,
+    Rect box,
+  ) async {
     try {
       final padX = max(
         _minCropPaddingPx,
@@ -867,7 +845,8 @@ class OCRProcessor {
   }
 
   _WordRecognitionResult _decodeCrnnOutput(List<List<double>> output) {
-    if (output.isEmpty) return _WordRecognitionResult(text: '', confidence: 0.0);
+    if (output.isEmpty)
+      return _WordRecognitionResult(text: '', confidence: 0.0);
 
     final buffer = StringBuffer();
     int lastIndex = -1;

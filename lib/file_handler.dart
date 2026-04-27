@@ -6,7 +6,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
-
 import 'ocr_processor.dart';
 
 class FileHandler {

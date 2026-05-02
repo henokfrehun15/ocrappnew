@@ -31,6 +31,13 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+            // Enable code shrinking and use proguard rules to keep required classes
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
